@@ -16,6 +16,10 @@ typedef struct Key {
     uint32_t epoch_;
 } Key;
 
+typedef struct EventCount {
+    uint64_t val_;
+} EventCount;
+
 int nativeFutexWake(const void *addr, int count, uint32_t wakeMask) {
 #ifndef PSHARED
     int rv = syscall(
@@ -68,7 +72,6 @@ int nativeFutexWaitImpl(const void *addr, uint32_t expected, uint32_t waitMask) 
     return rv;
 }
 
-uint64_t* val_;
 const uint64_t kAddWaiter = (uint64_t) (1);
 const uint64_t kSubWaiter = (uint64_t) (-1);
 const size_t kEpochShift = 32;
@@ -77,42 +80,41 @@ const size_t kEpochShift = 32;
 #define kIsLittleEndian 1
 const size_t kEpochOffset = kIsLittleEndian ? 1 : 0;
 
-inline void initEventCount() {
-    val_ = shm_malloc(sizeof(uint64_t));
-    *val_ = 0;
+inline void initEventCount(EventCount* ec) {
+    ec->val_ = 0;
 }
 
-inline void doNotify(int n) {
-    uint64_t prev = FAAra(val_, kAddEpoch);
+inline void doNotify(EventCount* ec, int n) {
+    uint64_t prev = FAAra(&ec->val_, kAddEpoch);
     if (unlikely(prev & kWaiterMask)) {
-        nativeFutexWake((uint32_t*)val_ + kEpochOffset, n, -1);
+        nativeFutexWake((uint32_t*)&ec->val_ + kEpochOffset, n, -1);
     }
 }
 
-inline void notify() {
-    doNotify(1);
+inline void notify(EventCount* ec) {
+    doNotify(ec, 1);
 }
 
-inline void notifyAll() {
-    doNotify(INT_MAX);
+inline void notifyAll(EventCount* ec) {
+    doNotify(ec, INT_MAX);
 }
 
-inline Key prepareWait() {
-    uint64_t prev = FAAra(val_, kAddWaiter);
+inline Key prepareWait(EventCount* ec) {
+    uint64_t prev = FAAra(&ec->val_, kAddWaiter);
     Key key;
     key.epoch_= prev >> kEpochShift;
     return key;
 }
 
-inline void cancelWait() {
-    FAAcs(val_, kSubWaiter);
+inline void cancelWait(EventCount* ec) {
+    FAAcs(&ec->val_, kSubWaiter);
 }
 
-inline void waitIndef(Key key) {
-    while ((ACQUIRE(val_) >> kEpochShift) == key.epoch_) {
-        nativeFutexWaitImpl((uint32_t*)val_ + kEpochOffset, key.epoch_, -1);
+inline void await(EventCount* ec, Key key) {
+    while ((ACQUIRE(&ec->val_) >> kEpochShift) == key.epoch_) {
+        nativeFutexWaitImpl((uint32_t*)&ec->val_ + kEpochOffset, key.epoch_, -1);
     }
-    FAAcs(val_, kSubWaiter);
+    FAAcs(&ec->val_, kSubWaiter);
 }
 
 #endif //C_EVENTCOUNT_H

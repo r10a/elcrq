@@ -80,8 +80,6 @@ int main() {
         p[i].id = i;
     }
 
-    initEventCount();
-
     if (fork() == 0) {
         shm_child();
         pthread_t sthreads[NUM_THREAD];
@@ -131,7 +129,7 @@ static void *sender(void *par) {
     for (int j = 0; j < NUM_RUNS; j++) {
         pthread_barrier_wait(barrier_t); // barrier to wait for all threads to initialize
         for (int k = 0; k < NUM_ITERS; k++) {
-            enqueue(k, p->id, q->tail);
+            enqueue(k, p->id, q);
             usleep(10);
         }
     }
@@ -146,7 +144,7 @@ static void *receiver(void *par) {
     for (int j = 0; j < NUM_RUNS; j++) {
         pthread_barrier_wait(barrier_t); // barrier to wait for all threads to initialize
         for (int k = 0; k < NUM_ITERS - 1; k++) {
-            Object element = dequeue(p->id, q->head);
+            Object element = dequeue(p->id, q);
             printf("%lu \n", element);
         }
     }

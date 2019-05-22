@@ -88,6 +88,7 @@ typedef struct RingQueue {
 typedef struct ELCRQ {
     RingQueue *head;
     RingQueue *tail;
+    EventCount ec;
 } ELCRQ;
 
 //RingQueue *head;
@@ -142,6 +143,7 @@ inline void init_queue(ELCRQ* q) {
     RingQueue *rq = getMemory(sizeof(RingQueue));
     init_ring(rq);
     q->head = q->tail = rq;
+    initEventCount(&q->ec);
 }
 
 
@@ -299,20 +301,20 @@ static inline Object deq(int pid, RingQueue* head) {
     }
 }
 
-inline void enqueue(Object arg, int pid, RingQueue* tail) {
-    enq(arg, pid, tail);
-    notifyAll();
+inline void enqueue(Object arg, int pid, ELCRQ* q) {
+    enq(arg, pid, q->tail);
+    notifyAll(&q->ec);
 }
 
-inline Object dequeue(int pid, RingQueue* head) {
-    Object element = deq(pid, head);
+inline Object dequeue(int pid, ELCRQ* q) {
+    Object element = deq(pid, q->head);
     if(element == FULL) {
         while(1) {
-            Key key = prepareWait();
-            if (likely((element = deq(pid, head)) == FULL)) {
-                waitIndef(key);
+            Key key = prepareWait(&q->ec);
+            if (likely((element = deq(pid, q->head)) == FULL)) {
+                await(&q->ec, key);
             } else {
-                cancelWait();
+                cancelWait(&q->ec);
                 break;
             }
         }
