@@ -10,7 +10,6 @@
 #include <asm/errno.h>
 #include "elcrq.h"
 #include "malloc.h"
-#include "EventCount.h"
 
 #ifndef NUM_ITERS
 #define NUM_ITERS 1000
@@ -133,9 +132,7 @@ static void *sender(void *par) {
         pthread_barrier_wait(barrier_t); // barrier to wait for all threads to initialize
         for (int k = 0; k < NUM_ITERS; k++) {
             enqueue(k, p->id, q->tail);
-            notifyAll();
             usleep(10);
-//            printf("notified\n");
         }
     }
     return 0;
@@ -149,21 +146,8 @@ static void *receiver(void *par) {
     for (int j = 0; j < NUM_RUNS; j++) {
         pthread_barrier_wait(barrier_t); // barrier to wait for all threads to initialize
         for (int k = 0; k < NUM_ITERS - 1; k++) {
-            if ((deq = dequeue(p->id, q->head))) {
-                printf("%d : %lu\n", j, deq);
-            } else {
-                while (1) {
-                    Key key = prepareWait();
-                    if (likely((deq = dequeue(p->id, q->head)) == NULL)) {
-                        printf("waiting\n");
-                        waitIndef(key);
-                    } else {
-                        cancelWait();
-                        break;
-                    }
-                }
-                printf("%d : %lu\n", j, deq);
-            }
+            Object element = dequeue(p->id, q->head);
+            printf("%lu \n", element);
         }
     }
     return 0;

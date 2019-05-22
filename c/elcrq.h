@@ -38,6 +38,7 @@
 #include <sys/time.h>
 #include "primitives.h"
 #include "malloc.h"
+#include "EventCount.h"
 
 // Definition: RING_POW
 // --------------------
@@ -49,6 +50,7 @@
 
 #define Object          uint64_t
 #define CACHE_ALIGN     __attribute__((aligned(64)))
+#define FULL (uint64_t)-1
 
 // Definition: RING_STATS
 // --------------------
@@ -103,9 +105,6 @@ inline void init_ring(RingQueue *r) {
     r->next = NULL;
 }
 
-int FULL;
-
-
 inline int is_empty(uint64_t v)  {
     return (v == (uint64_t)-1);
 }
@@ -135,31 +134,9 @@ inline int crq_is_closed(uint64_t t) {
     return (t & (1ull << 63)) != 0;
 }
 
-inline void *getMemory(unsigned int size)
-{
+inline void *getMemory(unsigned int size) {
     return shm_malloc(size);
-//    return malloc(size);
 }
-
-/*
-static void SHARED_OBJECT_INIT() {
-    int i;
-
-    RingQueue *rq = getMemory(sizeof(RingQueue));
-    init_ring(rq);
-    head = tail = rq;
-
-    if (FULL) {
-        // fill ring 
-        for (i = 0; i < RING_SIZE/2; i++) {
-            rq->array[i].val = 0;
-            rq->array[i].idx = i;
-            rq->tail++;
-        }
-        FULL = 0;
-    }
-}
-*/
 
 inline void init_queue(ELCRQ* q) {
     RingQueue *rq = getMemory(sizeof(RingQueue));
@@ -190,26 +167,9 @@ inline void fixState(RingQueue *rq) {
 __thread RingQueue *nrq;
 __thread RingQueue *hazardptr;
 
-#ifdef RING_STATS
-__thread uint64_t mycloses;
-__thread uint64_t myunsafes;
 
-uint64_t closes;
-uint64_t unsafes;
-
-inline void count_closed_crq(void) {
-    mycloses++;
-}
-
-
-inline void count_unsafe_node(void) {
-    myunsafes++;
-}
-#else
 inline void count_closed_crq(void) { }
 inline void count_unsafe_node(void) { }
-#endif
-
 
 inline int close_crq(RingQueue *rq, const uint64_t t, const int tries) {
     if (tries < 10)
@@ -218,19 +178,12 @@ inline int close_crq(RingQueue *rq, const uint64_t t, const int tries) {
         return BIT_TEST_AND_SET(&rq->tail, 63);
 }
 
-inline void enqueue(Object arg, int pid, RingQueue* tail) {
+static inline void enq(Object arg, int pid, RingQueue* tail) {
 
     int try_close = 0;
 
     while (1) {
         RingQueue *rq = tail;
-
-#ifdef HAVE_HPTRS
-        SWAP(&hazardptr, rq);
-        if (unlikely(tail != rq))
-            continue;
-#endif
-
         RingQueue *next = rq->next;
 
         if (unlikely(next != NULL)) {
@@ -281,17 +234,11 @@ inline void enqueue(Object arg, int pid, RingQueue* tail) {
     }
 }
 
-inline Object dequeue(int pid, RingQueue* head) {
+static inline Object deq(int pid, RingQueue* head) {
 
     while (1) {
         RingQueue *rq = head;
         RingQueue *next;
-
-#ifdef HAVE_HPTRS
-        SWAP(&hazardptr, rq);
-        if (unlikely(head != rq))
-            continue;
-#endif
 
         uint64_t h = FAA64(&rq->head, 1);
 
@@ -346,161 +293,29 @@ inline Object dequeue(int pid, RingQueue* head) {
             // try to return empty
             next = rq->next;
             if (next == NULL)
-                return NULL;  // EMPTY
+                return FULL;  // EMPTY
             CASPTR(&head, rq, next);
         }
     }
 }
 
-//pthread_barrier_t barr;
-/*
-
-unsigned long long d1 CACHE_ALIGN, d2;
-#define MAX_WORK 100
-cpu_set_t cpuset;
-
-void simSRandom(unsigned int seed)
-{
-    srand(seed);
+inline void enqueue(Object arg, int pid, RingQueue* tail) {
+    enq(arg, pid, tail);
+    notifyAll();
 }
 
-int simRandomRange(int start, int end)
-{
-    return rand() % (end - start) + start;
-}
-
-void _thread_pin(int id)
-{
-    CPU_SET(id, &cpuset);
-
-    int s = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
-    if (s != 0)
-        perror("pthread_setaffinity_np");
-}
-
-static inline unsigned long long rdtsc_ll() {
-    unsigned long long __h__, __l__;
-    __asm__ __volatile__
-    ("rdtsc" : "=d" (__h__), "=a" (__l__));
-    return (__h__ << 32) | __l__;
-}
-
-int getTimeMillis(void)
-{
-    */
-/* struct timeval tv; *//*
-
-    */
-/* gettimeofday(&tv, NULL); *//*
-
-    */
-/* return tv.tv_sec * 1000 + tv.tv_usec / 1000; *//*
-
-    */
-/* return tv.tv_usec; *//*
-
-
-    return rdtsc_ll();
-}
-
-inline void Execute(void* Arg) {
-    long i, rnum;
-    volatile int j;
-    long id = (long) Arg;
-
-    _thread_pin(id);
-    simSRandom(id + 1);
-    nrq = NULL;
-
-    if (id == N_THREADS - 1)
-        d1 = getTimeMillis();
-    // Synchronization point
-//    int rc = pthread_barrier_wait(&barr);
-    if (rc != 0 && rc != PTHREAD_BARRIER_SERIAL_THREAD) {
-        printf("Could not wait on barrier\n");
-        exit(-1);
+inline Object dequeue(int pid, RingQueue* head) {
+    Object element = deq(pid, head);
+    if(element == FULL) {
+        while(1) {
+            Key key = prepareWait();
+            if (likely((element = deq(pid, head)) == FULL)) {
+                waitIndef(key);
+            } else {
+                cancelWait();
+                break;
+            }
+        }
     }
-
-    */
-/* start_cpu_counters(id); *//*
-
-    for (i = 0; i < RUNS; i++) {
-        // perform an enqueue operation
-        enqueue(id, id);
-        rnum = simRandomRange(1, MAX_WORK);
-        for (j = 0; j < rnum; j++)
-            ;
-        // perform a dequeue operation
-        dequeue(id);
-        rnum = simRandomRange(1, MAX_WORK);
-        for (j = 0; j < rnum; j++)
-            ;
-    }
-    */
-/* stop_cpu_counters(id); *//*
-
-
-#ifdef RING_STATS
-    FAA64(&closes, mycloses);
-    FAA64(&unsafes, myunsafes);
-#endif
+    return element;
 }
-
-inline static void* EntryPoint(void* Arg) {
-    Execute(Arg);
-    return NULL;
-}
-
-inline pthread_t StartThread(int arg) {
-    long id = (long) arg;
-    void *Arg = (void*) id;
-    pthread_t thread_p;
-    int thread_id;
-
-    pthread_attr_t my_attr;
-    pthread_attr_init(&my_attr);
-    thread_id = pthread_create(&thread_p, &my_attr, EntryPoint, Arg);
-
-    return thread_p;
-}
-
-int maineeeeee(int argc, char **argv) {
-    pthread_t threads[N_THREADS];
-    int i;
-
-    FULL = 10;
-
-    // Barrier initialization
-    */
-/*if (pthread_barrier_init(&barr, NULL, N_THREADS)) {
-        printf("Could not create the barrier\n");
-        return -1;
-    }*//*
-
-
-    int full = FULL;
-
-//    SHARED_OBJECT_INIT();
-    CPU_ZERO(&cpuset);
-
-    for (i = 0; i < N_THREADS; i++)
-        threads[i] = StartThread(i);
-
-    for (i = 0; i < N_THREADS; i++)
-        pthread_join(threads[i], NULL);
-    d2 = getTimeMillis();
-
-    printf("time=%ld full=%d ", (unsigned long long) (d2 - d1), full);
-#ifdef RING_STATS
-    printf("closes=%ld unsafes=%ld ", closes, unsafes);
-#endif
-    */
-/* printStats(); *//*
-
-
-    if (pthread_barrier_destroy(&barr)) {
-        printf("Could not destroy the barrier\n");
-        return -1;
-    }
-    return 0;
-}*/

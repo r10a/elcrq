@@ -83,12 +83,8 @@ inline void initEventCount() {
 }
 
 inline void doNotify(int n) {
-//    printf("notify val: %lu\n", ACQUIREcs(&val_));
     uint64_t prev = FAAra(val_, kAddEpoch);
-//    printf("notify val: %lu %lu\n", prev, ACQUIREcs(val_));
-//    printf("%lu %lu %lu %lu %lu %lu %lu\n", prev, kAddWaiter, kSubWaiter, kEpochShift, kAddEpoch, kWaiterMask, kEpochOffset);
     if (unlikely(prev & kWaiterMask)) {
-//        printf("waking2\n");
         nativeFutexWake((uint32_t*)val_ + kEpochOffset, n, -1);
     }
 }
@@ -101,13 +97,10 @@ inline void notifyAll() {
     doNotify(INT_MAX);
 }
 
-
 inline Key prepareWait() {
     uint64_t prev = FAAra(val_, kAddWaiter);
-//    printf("notify val: %lu %lu\n", prev, ACQUIREcs(val_));
     Key key;
     key.epoch_= prev >> kEpochShift;
-//    printf("key: %lu %lu %d\n", ACQUIREcs(&val_), prev, key.epoch_);
     return key;
 }
 
