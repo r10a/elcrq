@@ -149,8 +149,6 @@ inline void init_queue(ELCRQ* q) {
 
 inline void fixState(RingQueue *rq) {
 
-    uint64_t t, h, n;
-
     while (1) {
         uint64_t t = FAA64(&rq->tail, 0);
         uint64_t h = FAA64(&rq->head, 0);
