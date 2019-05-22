@@ -26,6 +26,7 @@
 // THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#pragma once
 
 #include <stdio.h>
 #include <time.h>
@@ -35,6 +36,8 @@
 #include <stdint.h>
 #include <sched.h>
 #include <sys/time.h>
+#include "primitives.h"
+#include "malloc.h"
 
 // Definition: RING_POW
 // --------------------
@@ -44,20 +47,8 @@
 #endif
 #define RING_SIZE       (1ull << RING_POW)
 
-#define N_THREADS       4
 #define Object          uint64_t
 #define CACHE_ALIGN     __attribute__((aligned(64)))
-#define RUNS            100000
-
-#define FAA64(ptr, inc)                         \
-    __sync_fetch_and_add((ptr), (inc))
-
-#define CAS64(ptr, old, new)                    \
-    __sync_bool_compare_and_swap((ptr), (old), (new))
-
-#define CASPTR          CAS64
-#define StorePrefetch(val)                      \
-    do { } while (0)
 
 // Definition: RING_STATS
 // --------------------
@@ -71,45 +62,6 @@
 // reclamation.  You'll need to integrate this with your
 // hazard pointers implementation.
 //#define HAVE_HPTRS
-
-#define likely(x)       __builtin_expect(!!(x), 1)
-#define unlikely(x)     __builtin_expect(!!(x), 0)
-
-#define __CAS2(ptr, o1, o2, n1, n2)                             \
-({                                                              \
-    char __ret;                                                 \
-    __typeof__(o2) __junk;                                      \
-    __typeof__(*(ptr)) __old1 = (o1);                           \
-    __typeof__(o2) __old2 = (o2);                               \
-    __typeof__(*(ptr)) __new1 = (n1);                           \
-    __typeof__(o2) __new2 = (n2);                               \
-    asm volatile("lock cmpxchg16b %2;setz %1"                   \
-                   : "=d"(__junk), "=a"(__ret), "+m" (*ptr)     \
-                   : "b"(__new1), "c"(__new2),                  \
-                     "a"(__old1), "d"(__old2));                 \
-    __ret; })
-
-#ifdef DEBUG
-#define CAS2(ptr, o1, o2, n1, n2)                               \
-({                                                              \
-    int res;                                                    \
-    res = __CAS2(ptr, o1, o2, n1, n2);                          \
-    __executed_cas[__stats_thread_id].v++;                      \
-    __failed_cas[__stats_thread_id].v += 1 - res;               \
-    res;                                                        \
-})
-#else
-#define CAS2(ptr, o1, o2, n1, n2)    __CAS2(ptr, o1, o2, n1, n2)
-#endif
-
-
-#define BIT_TEST_AND_SET(ptr, b)                                \
-({                                                              \
-    char __ret;                                                 \
-    asm volatile("lock btsq $63, %0; setnc %1" : "+m"(*ptr), "=a"(__ret) : : "cc"); \
-    __ret;                                                      \
-})
-
 
 inline int is_empty(uint64_t v) __attribute__ ((pure));
 inline uint64_t node_index(uint64_t i) __attribute__ ((pure));
@@ -131,8 +83,13 @@ typedef struct RingQueue {
     RingNode array[RING_SIZE];
 } RingQueue __attribute__ ((aligned (128)));
 
-RingQueue *head;
-RingQueue *tail;
+typedef struct ELCRQ {
+    RingQueue *head;
+    RingQueue *tail;
+} ELCRQ;
+
+//RingQueue *head;
+//RingQueue *tail;
 
 inline void init_ring(RingQueue *r) {
     int i;
@@ -180,9 +137,11 @@ inline int crq_is_closed(uint64_t t) {
 
 inline void *getMemory(unsigned int size)
 {
-    return malloc(size);
+    return shm_malloc(size);
+//    return malloc(size);
 }
 
+/*
 static void SHARED_OBJECT_INIT() {
     int i;
 
@@ -199,6 +158,13 @@ static void SHARED_OBJECT_INIT() {
         }
         FULL = 0;
     }
+}
+*/
+
+inline void init_queue(ELCRQ* q) {
+    RingQueue *rq = getMemory(sizeof(RingQueue));
+    init_ring(rq);
+    q->head = q->tail = rq;
 }
 
 
@@ -252,7 +218,7 @@ inline int close_crq(RingQueue *rq, const uint64_t t, const int tries) {
         return BIT_TEST_AND_SET(&rq->tail, 63);
 }
 
-inline void enqueue(Object arg, int pid) {
+inline void enqueue(Object arg, int pid, RingQueue* tail) {
 
     int try_close = 0;
 
@@ -315,7 +281,7 @@ inline void enqueue(Object arg, int pid) {
     }
 }
 
-inline Object dequeue(int pid) {
+inline Object dequeue(int pid, RingQueue* head) {
 
     while (1) {
         RingQueue *rq = head;
@@ -380,13 +346,14 @@ inline Object dequeue(int pid) {
             // try to return empty
             next = rq->next;
             if (next == NULL)
-                return -1;  // EMPTY
+                return NULL;  // EMPTY
             CASPTR(&head, rq, next);
         }
     }
 }
 
-pthread_barrier_t barr;
+//pthread_barrier_t barr;
+/*
 
 unsigned long long d1 CACHE_ALIGN, d2;
 #define MAX_WORK 100
@@ -420,10 +387,18 @@ static inline unsigned long long rdtsc_ll() {
 
 int getTimeMillis(void)
 {
-    /* struct timeval tv; */
-    /* gettimeofday(&tv, NULL); */
-    /* return tv.tv_sec * 1000 + tv.tv_usec / 1000; */
-    /* return tv.tv_usec; */
+    */
+/* struct timeval tv; *//*
+
+    */
+/* gettimeofday(&tv, NULL); *//*
+
+    */
+/* return tv.tv_sec * 1000 + tv.tv_usec / 1000; *//*
+
+    */
+/* return tv.tv_usec; *//*
+
 
     return rdtsc_ll();
 }
@@ -440,13 +415,15 @@ inline void Execute(void* Arg) {
     if (id == N_THREADS - 1)
         d1 = getTimeMillis();
     // Synchronization point
-    int rc = pthread_barrier_wait(&barr);
+//    int rc = pthread_barrier_wait(&barr);
     if (rc != 0 && rc != PTHREAD_BARRIER_SERIAL_THREAD) {
         printf("Could not wait on barrier\n");
         exit(-1);
     }
 
-    /* start_cpu_counters(id); */
+    */
+/* start_cpu_counters(id); *//*
+
     for (i = 0; i < RUNS; i++) {
         // perform an enqueue operation
         enqueue(id, id);
@@ -459,7 +436,9 @@ inline void Execute(void* Arg) {
         for (j = 0; j < rnum; j++)
             ;
     }
-    /* stop_cpu_counters(id); */
+    */
+/* stop_cpu_counters(id); *//*
+
 
 #ifdef RING_STATS
     FAA64(&closes, mycloses);
@@ -485,21 +464,23 @@ inline pthread_t StartThread(int arg) {
     return thread_p;
 }
 
-int main(int argc, char **argv) {
+int maineeeeee(int argc, char **argv) {
     pthread_t threads[N_THREADS];
     int i;
 
     FULL = 10;
 
     // Barrier initialization
-    if (pthread_barrier_init(&barr, NULL, N_THREADS)) {
+    */
+/*if (pthread_barrier_init(&barr, NULL, N_THREADS)) {
         printf("Could not create the barrier\n");
         return -1;
-    }
+    }*//*
+
 
     int full = FULL;
 
-    SHARED_OBJECT_INIT();
+//    SHARED_OBJECT_INIT();
     CPU_ZERO(&cpuset);
 
     for (i = 0; i < N_THREADS; i++)
@@ -513,11 +494,13 @@ int main(int argc, char **argv) {
 #ifdef RING_STATS
     printf("closes=%ld unsafes=%ld ", closes, unsafes);
 #endif
-    /* printStats(); */
+    */
+/* printStats(); *//*
+
 
     if (pthread_barrier_destroy(&barr)) {
         printf("Could not destroy the barrier\n");
         return -1;
     }
     return 0;
-}
+}*/
