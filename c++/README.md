@@ -13,6 +13,8 @@ Hence, the processor should have at least 24 cores to run this simulation.
 
 To lower the number of threads per process, modify  `#define NUM_THREAD 8` in `main.cpp` on line 18.
 
+_P.S Work in progress_
+
 ### Build instructions
 Requires Boost libraries to be installed.
 
