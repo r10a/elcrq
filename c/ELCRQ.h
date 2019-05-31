@@ -331,8 +331,6 @@ inline void spinEnqueue(Object arg, int pid, ELCRQ *q) {
 inline Object spinDequeue(int pid, ELCRQ* q) {
     Object element;
     int patience = 0;
-    while (likely((element = deq(pid, q->head)) == EMPTY && patience++ < MAX_PATIENCE)) {
-//        printf("spinning %lu\n", element);
-    }
+    while (likely((element = deq(pid, q->head)) == EMPTY && patience++ < MAX_PATIENCE));
     return element;
 }
