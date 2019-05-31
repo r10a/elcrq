@@ -81,23 +81,17 @@ inline void EventCount::notifyAll() noexcept {
 }
 
 inline void EventCount::doNotify(int n) noexcept {
-//    printf("%lu\n", val_.load());
-//    printf("notify val: %lu\n",val_.load());
     uint64_t prev = val_.fetch_add(kAddEpoch, std::memory_order_acq_rel);
-//    printf("notify val: %lu %lu %lu %lu %lu %lu %lu\n", prev, kAddWaiter, kSubWaiter, kEpochShift, kAddEpoch, kWaiterMask, kEpochOffset);
     printf("notify val: %lu %lu\n",prev, val_.load());
     if (UNLIKELY(prev & kWaiterMask)) {
-//        printf("wake %lu %lu\n", prev, kWaiterMask);
         futexWake(reinterpret_cast<Futex<std::atomic> *>(&val_) + kEpochOffset, n);
     }
 }
 
 inline EventCount::Key EventCount::prepareWait() noexcept {
-//    printf("%lu\n", val_.load());
     uint64_t prev = val_.fetch_add(kAddWaiter, std::memory_order_acq_rel);
     printf("notify val: %lu %lu\n",prev, val_.load());
     Key key(prev >> kEpochShift);
-//    printf("key: %lu %lu %d\n", val_.load(), prev, key.epoch_);
     return key;
 }
 
