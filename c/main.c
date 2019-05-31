@@ -12,14 +12,14 @@
 #include "malloc.h"
 
 #ifndef NUM_ITERS
-#define NUM_ITERS 1000
+#define NUM_ITERS 100
 #endif
 
 #ifndef NUM_RUNS
 #define NUM_RUNS 1
 #endif
 
-#define NUM_THREAD 2
+#define NUM_THREAD 6
 
 #define SHM_FILE "tshm_file"
 
@@ -100,7 +100,7 @@ int main() {
         for (int i = 0; i < NUM_THREAD; i++) {
             pthread_join(sthreads[i], NULL);
         }
-        printf("Done 1\n");
+        printf("Process 1 Done\n");
         exit(0);
     } // Process 1 ends
 
@@ -113,7 +113,7 @@ int main() {
         for (int i = 0; i < NUM_THREAD; i++) {
             pthread_join(ithreads[i], NULL);
         }
-        printf("Done 2\n");
+        printf("Process 2 Done\n");
         exit(0);
     } // Process 2 ends
 
@@ -127,7 +127,7 @@ int main() {
         for (int i = 0; i < NUM_THREAD; i++) {
             pthread_join(rthreads[i], NULL);
         }
-        printf("Done 3\n");
+        printf("Process 3 Done\n");
         exit(0);
     } // Process 3 ends
 
