@@ -50,7 +50,8 @@
 
 #define Object          uint64_t
 #define CACHE_ALIGN     __attribute__((aligned(64)))
-#define FULL (uint64_t)-1
+#define EMPTY (uint64_t)-1
+#define MAX_PATIENCE 1000
 
 // Definition: RING_STATS
 // --------------------
@@ -65,12 +66,12 @@
 // hazard pointers implementation.
 //#define HAVE_HPTRS
 
-inline int is_empty(uint64_t v) __attribute__ ((pure));
-inline uint64_t node_index(uint64_t i) __attribute__ ((pure));
-inline uint64_t set_unsafe(uint64_t i) __attribute__ ((pure));
-inline uint64_t node_unsafe(uint64_t i) __attribute__ ((pure));
-inline uint64_t tail_index(uint64_t t) __attribute__ ((pure));
-inline int crq_is_closed(uint64_t t) __attribute__ ((pure));
+static inline int is_empty(uint64_t v) __attribute__ ((pure));
+static inline uint64_t node_index(uint64_t i) __attribute__ ((pure));
+static inline uint64_t set_unsafe(uint64_t i) __attribute__ ((pure));
+static inline uint64_t node_unsafe(uint64_t i) __attribute__ ((pure));
+static inline uint64_t tail_index(uint64_t t) __attribute__ ((pure));
+static inline int crq_is_closed(uint64_t t) __attribute__ ((pure));
 
 typedef struct RingNode {
     volatile uint64_t val;
@@ -91,10 +92,17 @@ typedef struct ELCRQ {
     EventCount ec;
 } ELCRQ;
 
+static inline void enq(Object arg, int pid, RingQueue* tail);
+static inline Object deq(int pid, RingQueue* head);
+inline void enqueue(Object arg, int pid, ELCRQ* q);
+inline Object dequeue(int pid, ELCRQ* q);
+inline void spinEnqueue(Object arg, int pid, ELCRQ *q);
+inline Object spinDequeue(int pid, ELCRQ* q);
+
 //RingQueue *head;
 //RingQueue *tail;
 
-inline void init_ring(RingQueue *r) {
+static inline void init_ring(RingQueue *r) {
     int i;
 
     for (i = 0; i < RING_SIZE; i++) {
@@ -106,36 +114,36 @@ inline void init_ring(RingQueue *r) {
     r->next = NULL;
 }
 
-inline int is_empty(uint64_t v)  {
+static inline int is_empty(uint64_t v)  {
     return (v == (uint64_t)-1);
 }
 
 
-inline uint64_t node_index(uint64_t i) {
+static inline uint64_t node_index(uint64_t i) {
     return (i & ~(1ull << 63));
 }
 
 
-inline uint64_t set_unsafe(uint64_t i) {
+static inline uint64_t set_unsafe(uint64_t i) {
     return (i | (1ull << 63));
 }
 
 
-inline uint64_t node_unsafe(uint64_t i) {
+static inline uint64_t node_unsafe(uint64_t i) {
     return (i & (1ull << 63));
 }
 
 
-inline uint64_t tail_index(uint64_t t) {
+static inline uint64_t tail_index(uint64_t t) {
     return (t & ~(1ull << 63));
 }
 
 
-inline int crq_is_closed(uint64_t t) {
+static inline int crq_is_closed(uint64_t t) {
     return (t & (1ull << 63)) != 0;
 }
 
-inline void *getMemory(unsigned int size) {
+static inline void *getMemory(unsigned int size) {
     return shm_malloc(size);
 }
 
@@ -147,7 +155,7 @@ inline void init_queue(ELCRQ* q) {
 }
 
 
-inline void fixState(RingQueue *rq) {
+static inline void fixState(RingQueue *rq) {
 
     while (1) {
         uint64_t t = FAA64(&rq->tail, 0);
@@ -166,10 +174,6 @@ inline void fixState(RingQueue *rq) {
 
 __thread RingQueue *nrq;
 __thread RingQueue *hazardptr;
-
-
-inline void count_closed_crq(void) { }
-inline void count_unsafe_node(void) { }
 
 inline int close_crq(RingQueue *rq, const uint64_t t, const int tries) {
     if (tries < 10)
@@ -228,7 +232,7 @@ static inline void enq(Object arg, int pid, RingQueue* tail) {
         uint64_t h = rq->head;
 
         if (unlikely(t - h >= RING_SIZE) && close_crq(rq, t, ++try_close)) {
-            count_closed_crq();
+//            count_closed_crq();
             goto alloc;
         }
     }
@@ -264,7 +268,7 @@ static inline Object deq(int pid, RingQueue* head) {
                         return val;
                 } else {
                     if (CAS2((uint64_t*)cell, val, cell_idx, val, set_unsafe(idx))) {
-                        count_unsafe_node();
+//                        count_unsafe_node();
                         break;
                     }
                 }
@@ -293,7 +297,7 @@ static inline Object deq(int pid, RingQueue* head) {
             // try to return empty
             next = rq->next;
             if (next == NULL)
-                return FULL;  // EMPTY
+                return EMPTY;  // EMPTY
             CASPTR(&head, rq, next);
         }
     }
@@ -301,21 +305,34 @@ static inline Object deq(int pid, RingQueue* head) {
 
 inline void enqueue(Object arg, int pid, ELCRQ* q) {
     enq(arg, pid, q->tail);
-    notifyAll(&q->ec);
+    notify(&q->ec);
 }
 
 inline Object dequeue(int pid, ELCRQ* q) {
     Object element = deq(pid, q->head);
-    if(element == FULL) {
+    if(element == EMPTY) {
         while(1) {
             Key key = prepareWait(&q->ec);
-            if (likely((element = deq(pid, q->head)) == FULL)) {
+            if (likely((element = deq(pid, q->head)) == EMPTY)) {
                 await(&q->ec, key);
             } else {
                 cancelWait(&q->ec);
                 break;
             }
         }
+    }
+    return element;
+}
+
+inline void spinEnqueue(Object arg, int pid, ELCRQ *q) {
+    enq(arg, pid, q->tail);
+}
+
+inline Object spinDequeue(int pid, ELCRQ* q) {
+    Object element;
+    int patience = 0;
+    while (likely((element = deq(pid, q->head)) == EMPTY && patience++ < MAX_PATIENCE)) {
+//        printf("spinning %lu\n", element);
     }
     return element;
 }
