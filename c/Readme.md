@@ -1,6 +1,7 @@
 ## ELCRQ C implementation
 
 Simulation of three process roundtrip scenario using ELCRQ.
+![round-trip scenario](../scenario-roundtrip.png)
 
 Shared memory module from [shm_malloc](https://github.com/ChrisDodd/shm_malloc) library.
 

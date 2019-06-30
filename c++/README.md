@@ -1,6 +1,7 @@
 ## Shared list of Concurrent Ring Queues benchmark
 
 Simulation of three process roundtrip scenario using ELCRQ.
+![round-trip scenario](../scenario-roundtrip.png)
 
 Shared memory module from [Boost](https://www.boost.org/doc/libs/1_63_0/doc/html/interprocess.html) library.
 

@@ -1,6 +1,7 @@
 # ELCRQ
 
 Simulation of three process roundtrip scenario using ELCRQ.
+![round-trip scenario](scenario-roundtrip.png)
 
 ELCRQ is a lockless block-when necessary queue based on [LCRQ](http://www.cs.tau.ac.il/~mad/publications/ppopp2013-x86queues.pdf).
 
